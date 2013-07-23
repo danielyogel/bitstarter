@@ -21,65 +21,80 @@
  - https://developer.mozilla.org/en-US/docs/JSON#JSON_in_Firefox_2
  */
 
-var fs = require('fs');
-var program = require('commander');
-var cheerio = require('cheerio');
-var HTMLFILE_DEFAULT = "index.html";
-var CHECKSFILE_DEFAULT = "checks.json";
-/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
+var fs = require('fs')
+  , program = require('commander')
+  , cheerio = require('cheerio')
+  , rest = require('restler')
+  , HTMLFILE_DEFAULT = 'index.html'
+  , CHECKSFILE_DEFAULT = 'checks.json';
 
-var assertFileExists = function (infile) {
+var assertFileExists = function(infile) {
   var instr = infile.toString();
-  if (!fs.existsSync(instr)) {
-    console.log("%s does not exist. Exiting.", instr);
+  if ( ! fs.existsSync(instr)) {
+    console.log('%s does not exist. Exiting.', instr);
     process.exit(1); // http://nodejs.org/api/process.html#process_process_exit_code
   }
   return instr;
 };
 
-/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
 
-var cheerioHtmlFile = function (htmlfile) {
-  return cheerio.load(fs.readFileSync(htmlfile));
-};
 
-var loadChecks = function (checksfile) {
-  return JSON.parse(fs.readFileSync(checksfile));
-};
 
-/*~~~~~~*/
-var checkHtmlFile = function (htmlfile, checksfile) {
-  $ = cheerioHtmlFile(htmlfile);
-  var checks = loadChecks(checksfile).sort();
-  var out = {};
-  for (var ii in checks) {
-    var present = $(checks[ii]).length > 0;
-    out[checks[ii]] = present;
+var Check = function(){
+  function run_checks(html, checksfile) {
+    var $ = cheerio.load(html);
+    var checks = JSON.parse(fs.readFileSync(checksfile)).sort();
+    var out = {};
+    for (var ii in checks) {
+      var present = $(checks[ii]).length > 0;
+      out[checks[ii]] = present;
+    }
+    return out;
   }
-  return out;
+
+  function write_output(output_json) {
+    var outJson = JSON.stringify(output_json, null, 4);
+    console.log(outJson);
+  }
+
+  return {
+    html_file: function(file, checksfile, output_cb){
+      output_cb = output_cb || write_output;
+
+      var results = run_checks(fs.readFileSync(file), checksfile);
+      output_cb(results);
+    },
+    url: function(url, checksfile, output_cb) {
+      output_cb = output_cb || write_output;
+
+      rest.get(url).on('complete', function(res){
+        if (res instanceof Error) {
+          console.error('Error: ' + res.message);
+        } else {
+          var results = run_checks(res, checksfile);
+          output_cb(results);
+        }
+      });
+    }
+  };
 };
 
 
 
-/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
-var clone = function (fn) {
-  // Workaround for commander.js issue.
-  // http://stackoverflow.com/a/6772648
-  return fn.bind({});
-};
 
-if (require.main == module) {
+if (require.main === module) {
   program
-    .option('-c, --checks <check_file>', 'Path to checks.json', clone(assertFileExists), CHECKSFILE_DEFAULT)
-    .option('-f, --file <html_file>', 'Path to index.html', clone(assertFileExists), HTMLFILE_DEFAULT)
+    .option('-c, --checks <val>', 'Path to checks.json', assertFileExists, CHECKSFILE_DEFAULT)
+    .option('-f, --file <val>', 'Path to index.html', assertFileExists, HTMLFILE_DEFAULT)
+    .option('-u, --url <val>', 'please enter a URL')
     .parse(process.argv);
 
-  var checkJson = checkHtmlFile(program.file, program.checks);
-  var outJson = JSON.stringify(checkJson, null, 4);
-  console.log(outJson);
-
+  var check = new Check();
+  if (program.url) {
+    check.url(program.url, program.checks);
+  } else if (program.file) {
+    check.html_file(program.file, program.checks);
+  }
 } else {
-  exports.checkHtmlFile = checkHtmlFile;
+  module.exports = new Check();
 }
-
-/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
